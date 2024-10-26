@@ -4,10 +4,10 @@
 
 //Pins
 #define BLDC_PIN 33
-#define MOTOR_L_PIN0 12
-#define MOTOR_L_PIN1 14
-#define MOTOR_R_PIN0 27
-#define MOTOR_R_PIN1 26
+#define MOTOR_R_PIN0 12
+#define MOTOR_R_PIN1 14
+#define MOTOR_L_PIN0 27
+#define MOTOR_L_PIN1 26
 
 //Frequencies
 #define DC_FREQ 20000
@@ -29,27 +29,21 @@ int LStickY_offset = 0;
 int RStickX_offset = 0;
 int R2Value_offset = 0;
 
+int stopped = 0;
+int bldc_ramp_setpoint = 0; //This increases when button is pressed, decreases when released
+
 void steering(Motor motorLeft, Motor motorRight, PS4Controller PS4) {
   if(PS4.isConnected()) {
     int16_t motor_speed_L = 0;
     int16_t motor_speed_R = 0;
     motor_speed_L += (PS4.LStickY() - LStickY_offset);
     motor_speed_R += (PS4.LStickY() -  LStickY_offset);
-    Serial.printf("AFTER Left speed: %d  Right speed %d\n", motor_speed_L, motor_speed_R);
-
     
-    if(abs(PS4.RStickX() + RStickX_offset) > 5) {
-      motor_speed_L -= (PS4.RStickX() + RStickX_offset)/2; //Maybe divide these or abs
-      motor_speed_R += (PS4.RStickX() - RStickX_offset)/2; //Maybe divide these or abs
+    if(abs(PS4.RStickX() + RStickX_offset) > 8) {
+      motor_speed_L -= (PS4.RStickX() + RStickX_offset)/2; //Divide for smoother steering
+      motor_speed_R += (PS4.RStickX() - RStickX_offset)/2; 
     }
-    /* Test this
-    if(abs(motor_speed_L) < 2) {
-      motor_speed_L = 0;
-    }
-    if(abs(motor_speed_R) < 2) {
-      motor_speed_R = 0;
-    }
-    */
+
     if(motor_speed_L > 127) {
       motor_speed_L = 127;
     }
@@ -62,23 +56,55 @@ void steering(Motor motorLeft, Motor motorRight, PS4Controller PS4) {
     if(motor_speed_R < -127) {
       motor_speed_R = -127;
     }
-    Serial.printf("Left speed: %d  Right speed %d\n", motor_speed_L, motor_speed_R);
     setMotorSpeed(motor_speed_L, motorLeft);
     setMotorSpeed(motor_speed_R, motorRight);
 
     //This must be tested!
-    if(PS4.R1()) {
+    int bldc_max_speed = 100;
+    int bldc_min_speed = 0;
+    if(PS4.R2Value() > 200) {
+        bldc_ramp_setpoint += 1;
+    }
+    if(PS4.R2Value() < 200) {
+        bldc_ramp_setpoint -= 1;
+    }
+    if(bldc_ramp_setpoint > bldc_max_speed) {
+      bldc_ramp_setpoint = bldc_max_speed;
+    }
+    if(bldc_ramp_setpoint < bldc_min_speed) {
+      bldc_ramp_setpoint = bldc_min_speed;
+    }
+    
+    if(PS4.L1()) {
+      //Serial.printf("BLDC downwards, negative setpoint %d R2:%d\n",bldc_ramp_setpoint,PS4.R2Value());
+      setMotorSpeed(-bldc_ramp_setpoint, motorWeapon); 
+    } else {
+      //Serial.printf("BLDC upwards, positive setpoint %d R2:%d\n",bldc_ramp_setpoint,PS4.R2Value());
+      setMotorSpeed(bldc_ramp_setpoint, motorWeapon);
+    }
+    /*
+    if(PS4.L1()) {
       setMotorSpeed(-(PS4.R2Value() - R2Value_offset), motorWeapon); 
     } else {
       setMotorSpeed(PS4.R2Value() - R2Value_offset, motorWeapon); 
-    }
+    }*/
   }
   else {
     setMotorSpeed(0, motorLeft);
     setMotorSpeed(0, motorRight);
     setMotorSpeed(0, motorWeapon);
+    bldc_ramp_setpoint = 0;
+  }
+  //Safety
+  if(PS4.Circle()) {
+    setMotorSpeed(0, motorLeft);
+    setMotorSpeed(0, motorRight);
+    setMotorSpeed(0, motorWeapon);
+    stopped = 1;
+    bldc_ramp_setpoint = 0;
   }
 }
+
 void PS4_calibrate() {
   int LStickY_offset = PS4.LStickY();
   int RStickX_offset = PS4.RStickX();
@@ -102,9 +128,16 @@ void setup() {
 }
 
 void loop() {
-  steering(motorLeft, motorRight, PS4); //Change to right after test
+  if(stopped) {
+    if(PS4.Square()) {
+      stopped = 0;
+    }
+  } else {
+    steering(motorLeft, motorRight, PS4);
+  }
+  
 
-  delay(1000);
+  //delay(1);
   /*
   if (PS4.isConnected()) {
     if (PS4.Square()) Serial.println("Square Button");
